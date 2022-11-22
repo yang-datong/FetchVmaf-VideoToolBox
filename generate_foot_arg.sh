@@ -1,0 +1,41 @@
+#!/bin/bash
+#kVTCompressionPropertyKey_MaxKeyFrameInterval 250
+#不能用的(ios15)
+#kVTCompressionPropertyKey_ConstantBitRate x
+#kVTCompressionPropertyKey_MinAllowedFrameQP x
+#kVTCompressionPropertyKey_ReferenceBufferCount x
+#kVTCompressionPropertyKey_UsingHardwareAccelerateVideoEncoder x
+#kVTVideoEncoderSpecification_EnableHardwareAccelerateVideoEncoder x
+#kVTCompressionPropertyKey_MultiPassStorage 运行报错
+
+list=(kVTCompressionPropertyKey_AllowFrameReordering kVTCompressionPropertyKey_AllowOpenGOP kVTCompressionPropertyKey_AllowTemporalCompression kVTCompressionPropertyKey_AlphaChannelMode kVTCompressionPropertyKey_AspectRatio16x9 kVTCompressionPropertyKey_AverageBitRate kVTCompressionPropertyKey_BaseLayerBitRateFraction kVTCompressionPropertyKey_BaseLayerFrameRate kVTCompressionPropertyKey_BaseLayerFrameRateFraction kVTCompressionPropertyKey_CleanAperture kVTCompressionPropertyKey_ColorPrimaries kVTCompressionPropertyKey_ContentLightLevelInfo kVTCompressionPropertyKey_DataRateLimits kVTCompressionPropertyKey_Depth kVTCompressionPropertyKey_EnableLTR kVTCompressionPropertyKey_EncoderID kVTCompressionPropertyKey_ExpectedDuration kVTCompressionPropertyKey_ExpectedFrameRate kVTCompressionPropertyKey_FieldCount kVTCompressionPropertyKey_FieldDetail kVTCompressionPropertyKey_GammaLevel kVTCompressionPropertyKey_H264EntropyMode kVTCompressionPropertyKey_HDRMetadataInsertionMode kVTCompressionPropertyKey_ICCProfile kVTCompressionPropertyKey_MasteringDisplayColorVolume kVTCompressionPropertyKey_MaxAllowedFrameQP kVTCompressionPropertyKey_MaxFrameDelayCount kVTCompressionPropertyKey_MaxH264SliceBytes kVTCompressionPropertyKey_MaxKeyFrameInterval kVTCompressionPropertyKey_MaxKeyFrameIntervalDuration kVTCompressionPropertyKey_MaximizePowerEfficiency kVTCompressionPropertyKey_MoreFramesAfterEnd kVTCompressionPropertyKey_MoreFramesBeforeStart kVTCompressionPropertyKey_NumberOfPendingFrames kVTCompressionPropertyKey_OutputBitDepth kVTCompressionPropertyKey_PixelAspectRatio kVTCompressionPropertyKey_PixelBufferPoolIsShared kVTCompressionPropertyKey_PixelTransferProperties kVTCompressionPropertyKey_PreserveDynamicHDRMetadata kVTCompressionPropertyKey_PrioritizeEncodingSpeedOverQuality kVTCompressionPropertyKey_ProfileLevel kVTCompressionPropertyKey_ProgressiveScan kVTCompressionPropertyKey_Quality kVTCompressionPropertyKey_RealTime kVTCompressionPropertyKey_SourceFrameCount kVTCompressionPropertyKey_SupportsBaseFrameQP kVTCompressionPropertyKey_TargetQualityForAlpha kVTCompressionPropertyKey_TransferFunction kVTCompressionPropertyKey_UsingGPURegistryID kVTCompressionPropertyKey_VideoEncoderPixelBufferAttributes kVTCompressionPropertyKey_YCbCrMatrix kVTEncodeFrameOptionKey_AcknowledgedLTRTokens kVTEncodeFrameOptionKey_BaseFrameQP kVTEncodeFrameOptionKey_ForceKeyFrame kVTEncodeFrameOptionKey_ForceLTRRefresh kVTSampleAttachmentKey_RequireLTRAcknowledgementToken kVTVideoEncoderSpecification_EnableLowLatencyRateControl kVTVideoEncoderSpecification_EncoderID kVTVideoEncoderSpecification_PreferredEncoderGPURegistryID kVTVideoEncoderSpecification_RequiredEncoderGPURegistryID)
+
+
+
+profile="./config.data"
+if [ -f $profile ];then
+	echo -ne "\033[31m current path life a config.data file, overlay? [y/n] \033[0m"
+	read flag
+	if [ "$flag" == "y" ];then
+		rm $profile
+	else
+		echo -e "\033[31mexit!\033[0m"
+		exit
+	fi
+fi
+
+for i in ${list[*]};do
+	if [ "$i" == "kVTCompressionPropertyKey_AverageBitRate" ];then
+		continue;	fi
+	echo "reset" >> $profile
+	echo "${i}:kCFBooleanTrue:add" >> $profile
+	echo "${i}:kCFBooleanFalse:add" >> $profile
+	echo "${i}:(__bridge CFTypeRef)@(fps):add" >> $profile
+	if [ "$i" == "kVTCompressionPropertyKey_MaxKeyFrameInterval" ];then
+		echo "${i}:(__bridge CFTypeRef)@(250):add" >> $profile
+	else
+		echo "${i}:(__bridge CFTypeRef)@(100):add" >> $profile
+	fi
+		echo "${i}:(__bridge CFTypeRef)@(1000):add" >> $profile
+#	echo "${i}::dele" >> $profile
+done
