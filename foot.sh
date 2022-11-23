@@ -13,8 +13,10 @@ tar_dir="${HOME}/Desktop/${bundle_name}"
 controller_file=${tar_dir}/${bundle_name}/ViewController.m
 target_edit_file=${tar_dir}/${bundle_name}/encode/${main_file}
 #------------------default config-----------------------
-compare_patterns="ffmpeg" #example -> ffmpeg|wztool
+compare_patterns="docker" #example -> ffmpeg|wztool
 is_auto_backup=1
+is_local_upload_yuv=0
+is_parameters_verbose=0
 max_wait_time=20
 src="src.mp4"
 out_mp4="dst.mp4"
@@ -42,6 +44,8 @@ unset is_start
 unset is_justlaunch
 unset is_upload
 unset is_encode_time_out
+unset is_loop
+unset loop_video_name
 unset docker_container_id
 
 ###################
@@ -50,23 +54,31 @@ unset docker_container_id
 main(){
 	check_compart_patterns
 	clean
-	if [ ! $is_upload ];then
-		check_yuv_file_is_upload
-	fi
+	if [ ! $is_upload ];then check_yuv_file_is_upload;fi
 	if [ $is_start ];then
-		if [ ! -f ${tar_dir}/${bundle_name}/encode/${main_file}_bck ];then
-			if [ $is_auto_backup == 1 ];then
-				cp ${tar_dir}/${bundle_name}/encode/${main_file} ${tar_dir}/${bundle_name}/encode/${main_file}_bck
-			else
-				log "I need sample file ,format name -> ${tar_dir}/${bundle_name}/encode/${main_file}_bck"; exit;
-			fi
-		fi
-		if [ ! -f $parameters_config_file ];then
-			log "I need a config.data file";exit;fi
+		check_is_need_auto_backup
+		check_parameters_config_file
 		while read line;do kernel "$line";done < $parameters_config_file
 	else
 		kernel
 	fi
+}
+upload_loop(){
+	if [ ! -d source ];then
+		log "I source dir"; exit;
+	fi
+	if [ $(ls source | wc -l) -gt 5 ];then
+		eecho "current number of videos checked is $(ls source | wc -l | sed s/[[:space:]]//g)" "33"
+		printf "\033[33mused video format name -> [video].MP4_done[ ok? ] : " >& 2
+		read tmp
+	fi
+	for file in source/*.MP4;do
+		loop_video_name=$file
+		cp $file ./${src}
+		eecho "prepare video -> $file"
+		main
+		mv $file ${file}_done
+	done
 }
 
 ##########################
@@ -91,21 +103,26 @@ kernel(){
 		local duration=$(grep "duration=" $video_info_file | awk -F "=" '{print $2}')
 		local r_frame_rate=$(grep "r_frame_rate" $video_info_file | awk -F "=" '{print $2}')
 		eecho "${src} -> codec_name:$codec_name" "0"
-		inject_video_info "int width =" $width
-		inject_video_info "int height =" $height
-		inject_video_info "int frameNum =" $((frameNum-1))
-		inject_video_info "double duration =" $duration
-		inject_video_info "double r_frame_rate =" $r_frame_rate
+		inject_video_info "int width =" "$width" $target_edit_file
+
+		inject_video_info "int height =" "$height" $target_edit_file
+
+		inject_video_info "int frameNum =" "$((frameNum-1))" $target_edit_file
+		inject_video_info "double duration =" "$duration" $target_edit_file
+		inject_video_info "double r_frame_rate =" "$r_frame_rate" $target_edit_file
+		#default not open decode
+		inject_video_info "int is_decodeYUV =" "0" $controller_file
 
 		local value=0
 		if [ $codec_type == "h265" ];then value=1;fi
-		inject_video_info "int IS_H264_OR_H265 =" $value
+		inject_video_info "int IS_H264_OR_H265 =" "$value" $target_edit_file
 	fi
 
 	if [[ $is_upload && $is_justlaunch ]];then
 #====================decompose MP4 source files into YUV frame sequences====================
 		eecho "$(sed -n $(expr $LINENO - 1)p $0)" "33"
-		update_yuv
+		if [ "$is_local_upload_yuv" == 1 ];then local_decode_yuv
+		else ios_decode_yuv ;fi
 	fi
 
 	if [ ! -z "$line" ];then #Not empty string
@@ -162,8 +179,15 @@ kernel(){
 
 #6.from [out].h264/h265 file convert MP4 file
 	eecho "$(sed -n $(expr $LINENO - 1)p $0)......." "33"
-	${mffmpeg} -i Documents/$out_file -c copy ${out_mp4} -y < /dev/null
+	if [ "$is_parameters_verbose" == 1 ];then
+		echo "${out_mp4}-ffmpeg copy bitrate:" >> $compare_result_file
+		ffmpeg -i Documents/$out_file -c copy ${out_mp4} -y < /dev/null 2>&1 | grep "bitrate=" >> $compare_result_file
+	else
+		${mffmpeg} -i Documents/$out_file -c copy ${out_mp4} -y < /dev/null
+	fi
 	uniform_frames
+
+	get_bitrate_value
 
 #7.use wztool to compare the coding result (into docker)
 	eecho "$(sed -n $(expr $LINENO - 1)p $0)......." "33"
@@ -172,6 +196,15 @@ kernel(){
 	else
 		ffmpeg_vmaf
 	fi
+}
+
+get_bitrate_value(){
+	local out_bit_rare=$(${mffprobe} -select_streams v -show_streams $out_mp4 | grep ^bit_rate | awk -F "=" '{print $2}')
+	local src_same_bit_rare=$(${mffprobe} -select_streams v -show_streams ${src_same_frames}.mp4 | grep ^bit_rate | awk -F "=" '{print $2}')
+	local src_bit_rare=$(${mffprobe} -select_streams v -show_streams $src | grep ^bit_rate | awk -F "=" '{print $2}')
+	echo "${out_mp4}-ffprobe info bitrate: ${out_bit_rare}" >> $compare_result_file
+	echo "${src_same_frames}.mp4-ffprobe info bitrate: ${src_same_bit_rare}" >> $compare_result_file
+	echo "${src}-ffprobe info bitrate: ${src_bit_rare}" >> $compare_result_file
 }
 
 ################
@@ -235,13 +268,14 @@ annotation(){
 inject_video_info(){
 	local str=$1
 	local new_value=$2
-	local old_info=$(grep "$str" $target_edit_file)
+	local file=$3
+	local old_info=$(grep "$str" $file)
 	if [ -z "$old_info" ];then
 		log "no string -> $str";exit
 	fi
 	eecho "old_info -> $old_info" "0"
 	local new_info="$str ${new_value};"
-	sed -i "" "s#${old_info}#${new_info}#" $target_edit_file
+	sed -i "" "s#${old_info}#${new_info}#" $file
 }
 
 #Use wait phone encode done
@@ -257,8 +291,8 @@ wait_encode_done(){
 			((time++))
 			eecho "wait iphone convert complete[${time}]..."
 			if [ $time == $max_wait_time ];then
-#				echo "$video:$1" >>  $batch_running_log
-#				log "bad -> $video"
+				echo "$loop_video_name" >>  $batch_running_log
+				log "bad -> $loop_video_name"
 				log "encode timeout"
 				is_encode_time_out=1
 				break
@@ -270,8 +304,14 @@ wait_encode_done(){
 	done
 }
 
+ios_decode_yuv(){
+	ios-deploy -W --bundle_id $bundle_id -X /Documents/${data_dir}
+	ios-deploy -W --bundle_id $bundle_id --upload $src --to Documents/$src
+	inject_video_info "int is_decodeYUV =" "1" $controller_file
+}
+
 #Use update into phone yuv data
-update_yuv(){
+local_decode_yuv(){
 	if [ -d $data_dir ];then	rm -rf $data_dir;fi
 	mkdir $data_dir
 	${mffmpeg} -i $src -f segment -segment_time 0.01 ${data_dir}/frames%d.yuv  < /dev/null
@@ -288,18 +328,28 @@ uniform_frames(){
 		#get out_file frames num
 		local compare_frame_num=$(${mffprobe} -select_streams v -show_streams $out_mp4 | grep "^nb_frames" |  awk -F "=" '{print $2}')
 		#convert : extract mp4 frames -> new mp4
-		${mffmpeg} -i $src -c copy -frames:v $compare_frame_num ${src_same_frames}.mp4 < /dev/null
+		if [ "$is_parameters_verbose" == 1 ];then
+			echo "${src} -ffmpeg copy bitrate:" >> $compare_result_file
+			ffmpeg -i $src -c copy -frames:v $compare_frame_num ${src_same_frames}.mp4 < /dev/null 2>&1 | grep "bitrate=" >> $compare_result_file
+		else
+			${mffmpeg} -i $src -c copy -frames:v $compare_frame_num ${src_same_frames}.mp4 < /dev/null
+		fi
 	fi
 }
 
 #Use get vmaf data
 ffmpeg_vmaf(){
-	if [ $is_start ];then
-		echo "-------------------------$line" >> $compare_result_file
-		${mffmpeg} -i ${src_same_frames}.mp4 -i ${out_mp4} -lavfi libvmaf=log_path=output.xml -f null - < /dev/null
-		cat output.xml >> $compare_result_file
+	if [[ $is_start || $is_loop ]];then
+		if [ $is_loop ];then
+			echo "-------------------------$loop_video_name" >> $compare_result_file
+		else
+			echo "-------------------------$line" >> $compare_result_file
+		fi
+		vmaf_score=$(ffmpeg -i ${src_same_frames}.mp4 -i ${out_mp4} -lavfi libvmaf="log_path=output.xml:psnr=1:ssim=1:log_fmt=json" -f null - < /dev/null 2>&1 | grep "VMAF score:")
+		echo $vmaf_score >> $compare_result_file
+		#cat output.xml >> $compare_result_file
 	else
-		${mffmpeg} -i ${src_same_frames}.mp4 -i ${out_mp4} -lavfi libvmaf=log_path=output.xml -f null - < /dev/null
+		ffmpeg -i ${src_same_frames}.mp4 -i ${out_mp4} -lavfi libvmaf="log_path=output.xml:psnr=1:ssim=1:log_fmt=json" -f null - < /dev/null
 	fi
 }
 
@@ -307,8 +357,12 @@ ffmpeg_vmaf(){
 into_docker_compaer_video(){
 	docker cp ${src_same_frames}.mp4 ${docker_container_id}:/root/src.mp4
 	docker cp $out_mp4 ${docker_container_id}:/root/dst.mp4
-	if [ $is_start ];then
-		echo "-------------------------$line" >> $compare_result_file
+	if [[ $is_start || $is_loop ]];then
+		if [ $is_loop ];then
+			echo "-------------------------$loop_video_name" >> $compare_result_file
+		else
+			echo "-------------------------$line" >> $compare_result_file
+		fi
 		docker exec ${docker_container_id} /bin/bash /root/calc-vmaf.sh >> $compare_result_file
 	else
 		docker exec ${docker_container_id} /bin/bash /root/calc-vmaf.sh >& 2
@@ -320,6 +374,7 @@ dump(){
 	ios-deploy -W --download=/Documents/${out_file} --bundle_id $bundle_id --to .
 	${mffmpeg} -i Documents/$out_file -c copy ${out_mp4} -y < /dev/null
 	uniform_frames
+	eecho "use $compare_patterns ..."
 	if [ "$compare_patterns" == "wztool" ];then
 		into_docker_compaer_video
 	else
@@ -352,6 +407,21 @@ check_compart_patterns(){
 	fi
 }
 
+check_is_need_auto_backup(){
+	if [ ! -f ${tar_dir}/${bundle_name}/encode/${main_file}_bck ];then
+		if [ "$is_auto_backup" == 1 ];then
+			cp ${tar_dir}/${bundle_name}/encode/${main_file} ${tar_dir}/${bundle_name}/encode/${main_file}_bck
+		else
+			log "I need sample file ,format name -> ${tar_dir}/${bundle_name}/encode/${main_file}_bck"; exit;
+		fi
+	fi
+}
+
+check_parameters_config_file(){
+	if [ ! -f $parameters_config_file ];then
+		log "I need a config.data file";exit;fi
+}
+
 #Use init env .clear project space
 clean(){
 	#current time
@@ -365,7 +435,7 @@ clean(){
 	fi
 	#clear
 	rm -rf $data_dir #add clear yuv file
-	local tmp_file=$(ls | grep -v "foot.sh\|src.mp4\|VideoEncode_rel\|config.data\|compare_result_history.txt\|Documents\|generate_foot_arg.sh\|README.md")
+	local tmp_file=$(ls | grep -v "foot.sh\|src.mp4\|VideoEncode_rel\|config.data\|compare_result_history.txt\|Documents\|generate_foot_arg.sh\|README.md\|source")
 	if [ -z "$tmp_file" ];then
 		eecho "alreadly been cleaned"
 	else
@@ -408,6 +478,7 @@ menu(){
 	echo -e "\033[31m"
 	echo "./foot.sh start" >& 2
 	echo "./foot.sh upload" >& 2
+	echo "./foot.sh upload loop" >& 2
 	echo "./foot.sh annotation [code_line] [on\off]" >& 2
 	echo "./foot.sh justlaunch" >& 2
 	echo "./foot.sh dump" >& 2
@@ -423,7 +494,8 @@ elif [ "$1" == start ];then
 elif [ "$1" == upload ];then
 	is_justlaunch=1
 	is_upload=1
-	main
+	if [ "$2" == loop ];then is_loop=1 ;upload_loop
+	else main;fi
 elif [ "$1" == annotation ];then
 	annotation $2 $3
 elif [ "$1" == justlaunch ];then
