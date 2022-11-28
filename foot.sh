@@ -3,17 +3,18 @@
 #------------------user config-----------------------
 #device_id="00008101-001169A13490001E" #iphone12(no use wifi connect)
 device_id="00008110-000458D63AB8801E" #iphone13(no use wifi connect)
-codec_type="h265"
+codec_type="h264"
 #work space
-docker_container_name="ios_test_2"
+docker_container_name="centos/wztool"
+project_name="FFmpeg_iOS"
 bundle_name="FFmpeg_iOS"
 bundle_id="VideoEncode"
 main_file="EncodeH264.m"
-tar_dir="${HOME}/Desktop/${bundle_name}"
+tar_dir="${HOME}/Desktop/${project_name}"
 controller_file=${tar_dir}/${bundle_name}/ViewController.m
 target_edit_file=${tar_dir}/${bundle_name}/encode/${main_file}
 #------------------default config-----------------------
-compare_patterns="docker" #example -> ffmpeg|wztool
+compare_patterns="wztool" #example -> libvmaf|wztool
 is_auto_backup=1
 is_local_upload_yuv=0
 is_parameters_verbose=0
@@ -21,6 +22,7 @@ max_wait_time=20
 src="src.mp4"
 out_mp4="dst.mp4"
 data_dir="test"
+language_type="int" #objc->int swift->let
 parameters_config_file="config.data"
 compare_result_file="compare_result.txt"
 #auto generate file
@@ -69,7 +71,7 @@ upload_loop(){
 	fi
 	if [ $(ls source | wc -l) -gt 5 ];then
 		eecho "current number of videos checked is $(ls source | wc -l | sed s/[[:space:]]//g)" "33"
-		printf "\033[33mused video format name -> [video].MP4_done[ ok? ] : " >& 2
+		eecho "mused video format name -> [video].MP4_done ,ok? [y/n]"
 		read tmp
 	fi
 	for file in source/*.MP4;do
@@ -103,19 +105,19 @@ kernel(){
 		local duration=$(grep "duration=" $video_info_file | awk -F "=" '{print $2}')
 		local r_frame_rate=$(grep "r_frame_rate" $video_info_file | awk -F "=" '{print $2}')
 		eecho "${src} -> codec_name:$codec_name" "0"
-		inject_video_info "int width =" "$width" $target_edit_file
+		inject_video_info "${language_type} width =" "$width" $target_edit_file
 
-		inject_video_info "int height =" "$height" $target_edit_file
+		inject_video_info "${language_type} height =" "$height" $target_edit_file
 
-		inject_video_info "int frameNum =" "$((frameNum-1))" $target_edit_file
+		inject_video_info "${language_type} frameNum =" "$((frameNum-1))" $target_edit_file
 		inject_video_info "double duration =" "$duration" $target_edit_file
 		inject_video_info "double r_frame_rate =" "$r_frame_rate" $target_edit_file
 		#default not open decode
-		inject_video_info "int is_decodeYUV =" "0" $controller_file
+		inject_video_info "${language_type} is_decodeYUV =" "0" $controller_file
 
 		local value=0
 		if [ $codec_type == "h265" ];then value=1;fi
-		inject_video_info "int IS_H264_OR_H265 =" "$value" $target_edit_file
+		inject_video_info "${language_type} IS_H264_OR_H265 =" "$value" $target_edit_file
 	fi
 
 	if [[ $is_upload && $is_justlaunch ]];then
@@ -187,8 +189,6 @@ kernel(){
 	fi
 	uniform_frames
 
-	get_bitrate_value
-
 #7.use wztool to compare the coding result (into docker)
 	eecho "$(sed -n $(expr $LINENO - 1)p $0)......." "33"
 	if [ "$compare_patterns" == "wztool" ];then
@@ -196,6 +196,10 @@ kernel(){
 	else
 		ffmpeg_vmaf
 	fi
+
+#8.get bitrate value
+	eecho "$(sed -n $(expr $LINENO - 1)p $0)......." "33"
+	get_bitrate_value
 }
 
 get_bitrate_value(){
@@ -203,8 +207,8 @@ get_bitrate_value(){
 	local src_same_bit_rare=$(${mffprobe} -select_streams v -show_streams ${src_same_frames}.mp4 | grep ^bit_rate | awk -F "=" '{print $2}')
 	local src_bit_rare=$(${mffprobe} -select_streams v -show_streams $src | grep ^bit_rate | awk -F "=" '{print $2}')
 	echo "${out_mp4}-ffprobe info bitrate: ${out_bit_rare}" >> $compare_result_file
-	echo "${src_same_frames}.mp4-ffprobe info bitrate: ${src_same_bit_rare}" >> $compare_result_file
-	echo "${src}-ffprobe info bitrate: ${src_bit_rare}" >> $compare_result_file
+	#echo "${src_same_frames}.mp4-ffprobe info bitrate: ${src_same_bit_rare}" >> $compare_result_file
+	#echo "${src}-ffprobe info bitrate: ${src_bit_rare}" >> $compare_result_file
 }
 
 ################
@@ -382,6 +386,38 @@ dump(){
 	fi
 }
 
+format(){
+	local flag="y"
+	local format_file="${compare_result_file%.*}.format"
+	if [ "$compare_patterns" != "wztools" ];then
+		eecho "are you sure you are using wztools for comparison?[y/n]" "33";read flag
+	fi
+	if [ "$flag" == "n" ];then	exit;fi
+	if [ -f ${compare_result_file} ];then
+		cat ${compare_result_file} >> ${compare_result_file%.*}_history.txt
+		rm ${compare_result_file}
+	fi
+	cat ${compare_result_file%.*}_history.txt | grep -e "-ffprobe\|------------------------\|PSNR\|SSIM\|^vmaf" > $format_file
+	sed -i '' "s/.\[1;3.m//" $format_file
+	eecho "done,out data into ${format_file}" "32"
+
+	calculate_average
+}
+
+calculate_average(){
+	file_line=$(cat $format_file | grep -e "------------------------" | wc -l )
+	all_bitrate=$(cat $format_file | grep "bitrate" | awk -F ":" '{print $2}')
+	all_vmaf=$(cat $format_file | grep "^vmaf" | awk -F ":" '{print $2}')
+
+	local sum=0
+	for i in $all_bitrate;do sum=$(echo "$sum + $i" | bc) ;echo "bitrate : $i";done
+	log "average : $(echo "scale=4; $sum / $file_line" | bc )"
+
+	sum=0
+	for i in $all_vmaf;do sum=$(echo "$sum + $i" | bc) ;echo "vmaf : $i";done
+	log "average : $(echo "scale=4; $sum / $file_line" | bc )"
+}
+
 #fail time play music
 play_music(){
 	ffplay ${music_file} &
@@ -464,10 +500,11 @@ log(){
 eecho(){
 	local info=$1
 	local flag=$2
+	shift;shift;
 	if [ -z "$flag" ];then
-		echo -e "\033[31m${info}\033[0m" >& 2
+		echo $* -e "\033[31m${info}\033[0m" >& 2
 	else
-		echo -e "\033[${flag}m${info}\033[0m" >& 2
+		echo $* -e "\033[${flag}m${info}\033[0m" >& 2
 	fi
 }
 
@@ -476,13 +513,14 @@ menu(){
 	echo -e "\033[33m"
 	echo -e "Target file -> ${target_edit_file}\033[0m\nexample:"
 	echo -e "\033[31m"
-	echo "./foot.sh start" >& 2
-	echo "./foot.sh upload" >& 2
-	echo "./foot.sh upload loop" >& 2
+	echo "./foot.sh start > /dev/null" >& 2
+	echo "./foot.sh upload > /dev/null" >& 2
+	echo "./foot.sh upload loop > /dev/null" >& 2
 	echo "./foot.sh annotation [code_line] [on\off]" >& 2
-	echo "./foot.sh justlaunch" >& 2
-	echo "./foot.sh dump" >& 2
+	echo "./foot.sh justlaunch > /dev/null" >& 2
+	echo "./foot.sh dump > /dev/null" >& 2
 	echo "./foot.sh clean" >& 2
+	echo -e "./foot.sh format \033[0m      ###format compare_result_file data and calculate the average\033[31m" >& 2
 	echo -e "\033[0m"
 }
 
@@ -503,6 +541,8 @@ elif [ "$1" == justlaunch ];then
 	main
 elif [ "$1" == dump ];then
 	dump
+elif [ "$1" == format ];then
+	format
 elif [ "$1" == clean ];then
 	clean
 else
