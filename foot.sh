@@ -5,6 +5,7 @@
 device_id="00008110-000458D63AB8801E" #iphone13(no use wifi connect)
 codec_type="h264"
 #work space
+compare_patterns="wztool" #example -> libvmaf|wztool
 docker_container_name="centos/wztool"
 project_name="FFmpeg_iOS"
 bundle_name="FFmpeg_iOS"
@@ -14,7 +15,6 @@ tar_dir="${HOME}/Desktop/${project_name}"
 controller_file=${tar_dir}/${bundle_name}/ViewController.m
 target_edit_file=${tar_dir}/${bundle_name}/encode/${main_file}
 #------------------default config-----------------------
-compare_patterns="wztool" #example -> libvmaf|wztool
 is_auto_backup=1
 is_local_upload_yuv=0
 is_parameters_verbose=0
@@ -202,15 +202,6 @@ kernel(){
 	get_bitrate_value
 }
 
-get_bitrate_value(){
-	local out_bit_rare=$(${mffprobe} -select_streams v -show_streams $out_mp4 | grep ^bit_rate | awk -F "=" '{print $2}')
-	local src_same_bit_rare=$(${mffprobe} -select_streams v -show_streams ${src_same_frames}.mp4 | grep ^bit_rate | awk -F "=" '{print $2}')
-	local src_bit_rare=$(${mffprobe} -select_streams v -show_streams $src | grep ^bit_rate | awk -F "=" '{print $2}')
-	echo "${out_mp4}-ffprobe info bitrate: ${out_bit_rare}" >> $compare_result_file
-	#echo "${src_same_frames}.mp4-ffprobe info bitrate: ${src_same_bit_rare}" >> $compare_result_file
-	#echo "${src}-ffprobe info bitrate: ${src_bit_rare}" >> $compare_result_file
-}
-
 ################
 #  data level  #
 ################
@@ -252,22 +243,45 @@ add(){
 " ${target_edit_file}
 }
 
-########################
-#  code extract level  #
-########################
-#Use to annotation code
-annotation(){
-	local code_line=$1
-	local status=$2
-	if [ "$status" == "on" ];then
-		sed -i "" "${code_line}s/\/\/status/status/g" $target_edit_file
-	elif [ "$status" == "off" ];then
-		sed -i "" "${code_line}s/status/\/\/status/g" $target_edit_file
-	else
-		log "annotation -> format error[on\off]";exit;
+#############################
+#  environment check level  #
+#############################
+check_yuv_file_is_upload(){
+	#check the project is empty
+	yuv_file=$(ios-deploy -1 $bundle_id --list | grep "/Documents/${data_dir}" | grep ".yuv$")
+	if [ -z "$yuv_file" ];then
+		log "yuv data is empty!!! , try \"./foot.sh upload > /dev/null\"" ;exit;
 	fi
 }
 
+#check docker is running
+check_compart_patterns(){
+	if [ "$compare_patterns" == "wztool" ];then
+		docker_container_id=$(docker ps | grep "$docker_container_name" | awk '{print $1}')
+		if [ -z "$docker_container_id" ];then
+			log "docker run faild";exit;fi
+	fi
+}
+
+check_is_need_auto_backup(){
+	if [ ! -f ${tar_dir}/${bundle_name}/encode/${main_file}_bck ];then
+		if [ "$is_auto_backup" == 1 ];then
+			cp ${tar_dir}/${bundle_name}/encode/${main_file} ${tar_dir}/${bundle_name}/encode/${main_file}_bck
+		else
+			log "I need sample file ,format name -> ${tar_dir}/${bundle_name}/encode/${main_file}_bck"; exit;
+		fi
+	fi
+}
+
+check_parameters_config_file(){
+	if [ ! -f $parameters_config_file ];then
+		log "I need a config.data file";exit;fi
+}
+
+
+########################
+#  code extract level  #
+########################
 #Use to write video info[width,height,framesNum] into inject code
 inject_video_info(){
 	local str=$1
@@ -308,6 +322,7 @@ wait_encode_done(){
 	done
 }
 
+#Use call ios project decode
 ios_decode_yuv(){
 	ios-deploy -W --bundle_id $bundle_id -X /Documents/${data_dir}
 	ios-deploy -W --bundle_id $bundle_id --upload $src --to Documents/$src
@@ -373,6 +388,34 @@ into_docker_compaer_video(){
 	fi
 }
 
+#Use get bitrate data
+get_bitrate_value(){
+	local out_bit_rare=$(${mffprobe} -select_streams v -show_streams $out_mp4 | grep ^bit_rate | awk -F "=" '{print $2}')
+	local src_same_bit_rare=$(${mffprobe} -select_streams v -show_streams ${src_same_frames}.mp4 | grep ^bit_rate | awk -F "=" '{print $2}')
+	local src_bit_rare=$(${mffprobe} -select_streams v -show_streams $src | grep ^bit_rate | awk -F "=" '{print $2}')
+	echo "${out_mp4}-ffprobe info bitrate: ${out_bit_rare}" >> $compare_result_file
+	#echo "${src_same_frames}.mp4-ffprobe info bitrate: ${src_same_bit_rare}" >> $compare_result_file
+	#echo "${src}-ffprobe info bitrate: ${src_bit_rare}" >> $compare_result_file
+}
+
+
+################
+#  util level  #
+################
+#Use to annotation code
+annotation(){
+	local code_line=$1
+	local status=$2
+	if [ "$status" == "on" ];then
+		sed -i "" "${code_line}s/\/\/status/status/g" $target_edit_file
+	elif [ "$status" == "off" ];then
+		sed -i "" "${code_line}s/status/\/\/status/g" $target_edit_file
+	else
+		log "annotation -> format error[on\off]";exit;
+	fi
+}
+
+#Use to dump iphone in [out].file[h264\h265\mp4]
 dump(){
 	check_compart_patterns
 	ios-deploy -W --download=/Documents/${out_file} --bundle_id $bundle_id --to .
@@ -386,6 +429,7 @@ dump(){
 	fi
 }
 
+#Use to format log file
 format(){
 	local flag="y"
 	local format_file="${compare_result_file%.*}.format"
@@ -404,6 +448,7 @@ format(){
 	calculate_average
 }
 
+#calculate bitrate and vmaf average
 calculate_average(){
 	file_line=$(cat $format_file | grep -e "------------------------" | wc -l )
 	all_bitrate=$(cat $format_file | grep "bitrate" | awk -F ":" '{print $2}')
@@ -424,38 +469,6 @@ play_music(){
 	local thread_id=$!
 	sleep $max_wait_time
 	kill $thread_id
-}
-
-check_yuv_file_is_upload(){
-	#check the project is empty
-	yuv_file=$(ios-deploy -1 $bundle_id --list | grep "/Documents/${data_dir}" | grep ".yuv$")
-	if [ -z "$yuv_file" ];then
-		log "yuv data is empty!!! , try \"./foot.sh upload > /dev/null\"" ;exit;
-	fi
-}
-
-#check docker is running
-check_compart_patterns(){
-	if [ "$compare_patterns" == "wztool" ];then
-		docker_container_id=$(docker ps | grep "$docker_container_name" | awk '{print $1}')
-		if [ -z "$docker_container_id" ];then
-			log "docker run faild";exit;fi
-	fi
-}
-
-check_is_need_auto_backup(){
-	if [ ! -f ${tar_dir}/${bundle_name}/encode/${main_file}_bck ];then
-		if [ "$is_auto_backup" == 1 ];then
-			cp ${tar_dir}/${bundle_name}/encode/${main_file} ${tar_dir}/${bundle_name}/encode/${main_file}_bck
-		else
-			log "I need sample file ,format name -> ${tar_dir}/${bundle_name}/encode/${main_file}_bck"; exit;
-		fi
-	fi
-}
-
-check_parameters_config_file(){
-	if [ ! -f $parameters_config_file ];then
-		log "I need a config.data file";exit;fi
 }
 
 #Use init env .clear project space
@@ -479,7 +492,7 @@ clean(){
 	fi
 }
 
-
+#hugely print conlose
 log(){
 	if [ $# -gt 1 ];then
 		printf "\033[31mParameter can only be one!!!" >& 2;exit;fi
