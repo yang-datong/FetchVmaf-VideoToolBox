@@ -5,22 +5,24 @@
 device_id="00008110-000458D63AB8801E" #iphone13(no use wifi connect)
 codec_type="h264"
 #work space
-compare_patterns="wztool" #example -> libvmaf|wztool
+compare_patterns="libvmaf" #example -> libvmaf|wztool
 docker_container_name="centos/wztool"
-project_name="FFmpeg_iOS"
 bundle_name="FFmpeg_iOS"
 bundle_id="VideoEncode"
+app_name="VideoEncode"
 main_file="EncodeH264.m"
-tar_dir="${HOME}/Desktop/${project_name}"
-controller_file=${tar_dir}/${bundle_name}/ViewController.m
-target_edit_file=${tar_dir}/${bundle_name}/encode/${main_file}
+tar_dir="${HOME}/Desktop/${bundle_name}/${bundle_name}"
+controller_file=${tar_dir}/ViewController.m
+target_edit_file=${tar_dir}/encode/${main_file}
 #------------------default config-----------------------
 is_auto_backup=1
+is_need_save_video=1
 is_local_upload_yuv=0
 is_parameters_verbose=0
 max_wait_time=20
 src="src.mp4"
 out_mp4="dst.mp4"
+dst_dir="out_video"
 data_dir="test"
 language_type="int" #objc->int swift->let
 parameters_config_file="config.data"
@@ -66,20 +68,18 @@ main(){
 	fi
 }
 upload_loop(){
-	if [ ! -d source ];then
-		log "I source dir"; exit;
-	fi
+	if [ ! -d source ];then	log "I need source dir!!!"; exit;fi
 	if [ $(ls source | wc -l) -gt 5 ];then
 		eecho "current number of videos checked is $(ls source | wc -l | sed s/[[:space:]]//g)" "33"
 		eecho "mused video format name -> [video].MP4_done ,ok? [y/n]"
 		read tmp
 	fi
-	for file in source/*.MP4;do
-		loop_video_name=$file
-		cp $file ./${src}
-		eecho "prepare video -> $file"
+	for file in `ls source | grep -v "*.MP4\|*.mp4"`;do
+		loop_video_name="source/$file"
+		cp ${loop_video_name} ${src}
+		eecho "prepare video -> ${loop_video_name}"
 		main
-		mv $file ${file}_done
+		mv ${loop_video_name} ${loop_video_name}_done
 	done
 }
 
@@ -97,27 +97,7 @@ kernel(){
 	if [ ! -f  $video_info_file ];then
 #====================view source video file metadata====================
 		eecho "$(sed -n $(expr $LINENO - 1)p $0)" "33"
-		${mffprobe} -select_streams v -show_streams $src > $video_info_file
-		local width=$(grep "^width" $video_info_file | awk -F "=" '{print $2}')
-		local height=$(grep "^height" $video_info_file | awk -F "=" '{print $2}')
-		local frameNum=$(grep "^nb_frames" $video_info_file | awk -F "=" '{print $2}')
-		local codec_name=$(grep "^codec_name" $video_info_file | awk -F "=" '{print $2}')
-		local duration=$(grep "duration=" $video_info_file | awk -F "=" '{print $2}')
-		local r_frame_rate=$(grep "r_frame_rate" $video_info_file | awk -F "=" '{print $2}')
-		eecho "${src} -> codec_name:$codec_name" "0"
-		inject_video_info "${language_type} width =" "$width" $target_edit_file
-
-		inject_video_info "${language_type} height =" "$height" $target_edit_file
-
-		inject_video_info "${language_type} frameNum =" "$((frameNum-1))" $target_edit_file
-		inject_video_info "double duration =" "$duration" $target_edit_file
-		inject_video_info "double r_frame_rate =" "$r_frame_rate" $target_edit_file
-		#default not open decode
-		inject_video_info "${language_type} is_decodeYUV =" "0" $controller_file
-
-		local value=0
-		if [ $codec_type == "h265" ];then value=1;fi
-		inject_video_info "${language_type} IS_H264_OR_H265 =" "$value" $target_edit_file
+		update_video_info
 	fi
 
 	if [[ $is_upload && $is_justlaunch ]];then
@@ -137,8 +117,7 @@ kernel(){
 		#Parameters3 -> operation type
 		local op_type=$(echo $line | awk -F ":" '{print $3}')
 		if [[ -z "$parameters_key" || -z "$new_value" || -z "$op_type" ]];then
-			log "wrong format of parameter file"
-			exit
+			log "wrong format of parameter file";exit
 		fi
 		eecho "parameters_key -> $parameters_key"
 		if [ "$op_type" == "add" ];then
@@ -159,12 +138,16 @@ kernel(){
 
 #3.launch App && and start encode
 	eecho "$(sed -n $(expr $LINENO - 1)p $0)......." "33"
-	ios-deploy -W --justlaunch --bundle ./build/Release-iphoneos/${bundle_id}.app
+	ios-deploy -W --justlaunch --bundle ./build/Release-iphoneos/${app_name}.app
 	popd
 
 #4.wait encode done
 	eecho "$(sed -n $(expr $LINENO - 1)p $0)......." "33"
+	local old_date=$(date +"%Y%m%d%H%M%S")
 	wait_encode_done
+	local date=$(date +"%Y%m%d%H%M%S")
+	local time=$(echo "$date - $old_date" | bc)
+	echo "decode time : $time" >> $compare_result_file
 	if [ "$is_encode_time_out" == 1 ];then is_encode_time_out=0;return 1;fi
 
 #5.dump [out].h264/h265
@@ -200,6 +183,12 @@ kernel(){
 #8.get bitrate value
 	eecho "$(sed -n $(expr $LINENO - 1)p $0)......." "33"
 	get_bitrate_value
+
+	if [ "$is_need_save_video" == 1 ];then
+#9.save compare video[same_frames_video,out_mp4]
+		eecho "$(sed -n $(expr $LINENO - 1)p $0)......." "33"
+		save_video
+	fi
 }
 
 ################
@@ -217,8 +206,7 @@ replace(){
 	local parameters_key=$1
 	local new_value=$2
 	if [[ -z "$parameters_key" || -z "$new_value" ]];then
-		log "replace -> parameters error";exit;
-	fi
+		log "replace -> parameters error";exit;fi
 	local parameters_value=$(grep "$parameters_key" ${target_edit_file} | awk -F "," '{print $3}')
 	local code_line=$(grep -n "$parameters_key" ${target_edit_file} | awk -F ":" '{print $1}')
 	if [[ ! -z "$parameters_value" && ! -z "$code_line" ]];then
@@ -282,6 +270,35 @@ check_parameters_config_file(){
 ########################
 #  code extract level  #
 ########################
+#Used save video
+save_video(){
+	if [ ! -d $dst_dir ];then mkdir $dst_dir;fi
+	eecho $loop_video_name
+	local file=$(basename $loop_video_name)
+	mv $out_mp4 ${dst_dir}/out_$file
+	mv ${src_same_frames}.mp4 ${dst_dir}/same_frames_$file
+}
+#Used update ios project video info
+update_video_info(){
+	${mffprobe} -select_streams v -show_streams $src > $video_info_file
+	local width=$(grep "^width" $video_info_file | awk -F "=" '{print $2}')
+	local height=$(grep "^height" $video_info_file | awk -F "=" '{print $2}')
+	local frameNum=$(grep "^nb_frames" $video_info_file | awk -F "=" '{print $2}')
+	local codec_name=$(grep "^codec_name" $video_info_file | awk -F "=" '{print $2}')
+	local duration=$(grep "duration=" $video_info_file | awk -F "=" '{print $2}')
+	local r_frame_rate=$(grep "r_frame_rate" $video_info_file | awk -F "=" '{print $2}')
+	eecho "${src} -> codec_name:$codec_name" "0"
+	inject_video_info "${language_type} width =" "$width" $target_edit_file
+	inject_video_info "${language_type} height =" "$height" $target_edit_file
+	inject_video_info "${language_type} frameNum =" "$((frameNum-1))" $target_edit_file
+	inject_video_info "double duration =" "$duration" $target_edit_file
+	inject_video_info "double r_frame_rate =" "$r_frame_rate" $target_edit_file
+	inject_video_info "${language_type} is_decodeYUV =" "0" $controller_file  #default not open decode
+	local value=0
+	if [ $codec_type == "h265" ];then value=1;fi
+	inject_video_info "${language_type} IS_H264_OR_H265 =" "$value" $target_edit_file
+}
+
 #Use to write video info[width,height,framesNum] into inject code
 inject_video_info(){
 	local str=$1
@@ -289,8 +306,7 @@ inject_video_info(){
 	local file=$3
 	local old_info=$(grep "$str" $file)
 	if [ -z "$old_info" ];then
-		log "no string -> $str";exit
-	fi
+		log "no string -> $str";exit;fi
 	eecho "old_info -> $old_info" "0"
 	local new_info="$str ${new_value};"
 	sed -i "" "s#${old_info}#${new_info}#" $file
@@ -298,16 +314,14 @@ inject_video_info(){
 
 #Use wait phone encode done
 wait_encode_done(){
-	idevicesyslog -u $device_id -p $bundle_id > is_compele_convert &
+	idevicesyslog -u $device_id -p $app_name > is_compele_convert &
 	local thread_id=$!
 	local time=0
-	while(true)
-	do
+	while(true);do
 		sleep 1
 		cat is_compele_convert | grep "$encode_compare_flag"
 		if [ $? -ne 0 ];then
-			((time++))
-			eecho "wait iphone convert complete[${time}]..."
+			((time++)); eecho "wait iphone convert complete[${time}]..."
 			if [ $time == $max_wait_time ];then
 				echo "$loop_video_name" >>  $batch_running_log
 				log "bad -> $loop_video_name"
@@ -316,9 +330,7 @@ wait_encode_done(){
 				break
 			fi
 		else
-			kill $thread_id
-			break
-		fi
+			kill $thread_id;break;fi
 	done
 }
 
@@ -351,8 +363,7 @@ uniform_frames(){
 			echo "${src} -ffmpeg copy bitrate:" >> $compare_result_file
 			ffmpeg -i $src -c copy -frames:v $compare_frame_num ${src_same_frames}.mp4 < /dev/null 2>&1 | grep "bitrate=" >> $compare_result_file
 		else
-			${mffmpeg} -i $src -c copy -frames:v $compare_frame_num ${src_same_frames}.mp4 < /dev/null
-		fi
+			${mffmpeg} -i $src -c copy -frames:v $compare_frame_num ${src_same_frames}.mp4 < /dev/null;fi
 	fi
 }
 
@@ -434,33 +445,42 @@ format(){
 	local flag="y"
 	local format_file="${compare_result_file%.*}.format"
 	if [ "$compare_patterns" != "wztools" ];then
-		eecho "are you sure you are using wztools for comparison?[y/n]" "33";read flag
-	fi
+		eecho "are you sure you are using wztools for comparison?[y/n]" "33";read flag;fi
 	if [ "$flag" == "n" ];then	exit;fi
 	if [ -f ${compare_result_file} ];then
 		cat ${compare_result_file} >> ${compare_result_file%.*}_history.txt
 		rm ${compare_result_file}
 	fi
-	cat ${compare_result_file%.*}_history.txt | grep -e "-ffprobe\|------------------------\|PSNR\|SSIM\|^vmaf" > $format_file
+	if [ "$compare_patterns" == "wztools" ];then
+		cat ${compare_result_file%.*}_history.txt | grep -e "-ffprobe\|------------------------\|PSNR\|SSIM\|^vmaf" > $format_file
+	else
+		cat ${compare_result_file%.*}_history.txt | grep -e "-ffprobe\|------------------------\|PSNR\|SSIM\|VMAF" > $format_file
+	fi
 	sed -i '' "s/.\[1;3.m//" $format_file
 	eecho "done,out data into ${format_file}" "32"
-
 	calculate_average
 }
 
 #calculate bitrate and vmaf average
 calculate_average(){
-	file_line=$(cat $format_file | grep -e "------------------------" | wc -l )
-	all_bitrate=$(cat $format_file | grep "bitrate" | awk -F ":" '{print $2}')
-	all_vmaf=$(cat $format_file | grep "^vmaf" | awk -F ":" '{print $2}')
+	local file_line=""
+	local all_vmaf=""
+	local all_bitrate=$(cat $format_file | grep "bitrate" | awk -F ":" '{print $2}')
+	if [ "$compare_patterns" == "wztools" ];then
+		file_line=$(cat $format_file | grep "^vmaf" | wc -l )
+		all_vmaf=$(cat $format_file | grep "^vmaf" | awk -F ":" '{print $2}')
+	else
+		file_line=$(cat $format_file | grep "VMAF" | wc -l )
+		all_vmaf=$(cat $format_file | grep "VMAF" | awk -F ":" '{print $2}')
+	fi
 
 	local sum=0
 	for i in $all_bitrate;do sum=$(echo "$sum + $i" | bc) ;echo "bitrate : $i";done
-	log "average : $(echo "scale=4; $sum / $file_line" | bc )"
+	log "average : $(echo "scale=2; $sum / $file_line" | bc )"
 
 	sum=0
 	for i in $all_vmaf;do sum=$(echo "$sum + $i" | bc) ;echo "vmaf : $i";done
-	log "average : $(echo "scale=4; $sum / $file_line" | bc )"
+	log "average : $(echo "scale=2; $sum / $file_line" | bc )"
 }
 
 #fail time play music
@@ -484,7 +504,7 @@ clean(){
 	fi
 	#clear
 	rm -rf $data_dir #add clear yuv file
-	local tmp_file=$(ls | grep -v "foot.sh\|src.mp4\|VideoEncode_rel\|config.data\|compare_result_history.txt\|Documents\|generate_foot_arg.sh\|README.md\|source")
+	local tmp_file=$(ls | grep -v "foot.sh\|src.mp4\|VideoEncode_rel\|config.data\|compare_result_history.txt\|Documents\|generate_foot_arg.sh\|README.md\|source\|out_video")
 	if [ -z "$tmp_file" ];then
 		eecho "alreadly been cleaned"
 	else
@@ -540,18 +560,15 @@ menu(){
 if [ "$1" == help ];then
 	menu
 elif [ "$1" == start ];then
-	is_start=1
-	main
+	is_start=1;main
 elif [ "$1" == upload ];then
-	is_justlaunch=1
-	is_upload=1
+	is_justlaunch=1;is_upload=1
 	if [ "$2" == loop ];then is_loop=1 ;upload_loop
 	else main;fi
 elif [ "$1" == annotation ];then
 	annotation $2 $3
 elif [ "$1" == justlaunch ];then
-	is_justlaunch=1
-	main
+	is_justlaunch=1;main
 elif [ "$1" == dump ];then
 	dump
 elif [ "$1" == format ];then
