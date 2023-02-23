@@ -8,10 +8,12 @@
 
 - `ios-deploy`用作操作手机的文件系统、以及启动App
   - github : [https://github.com/ios-control/ios-deploy](https://github.com/ios-control/ios-deploy)
-
+  - mac:`brew install ios-deploy`
+  
 - `idevicesyslog`用作调取App日志
   - github : [https://github.com/libimobiledevice/libimobiledevice](https://github.com/libimobiledevice/libimobiledevice)
-
+  - mac: `brew install libimobiledevice`
+  
 - `ffmpeg/ffplayer/ffprobe`视频编解码
 
 上述环境需要自行安装
@@ -65,9 +67,13 @@ is_info_ffmpeg="-loglevel quiet"
 
 ## 使用
 
+- 运行前需要指定源视频文件，并命名为`src.mp4`
+
 - 脚本使用时建议为独立目录，因为每次执行脚本都会自动清空当前的运行过程中产生临时文件
 
 - 本脚本中对比模式有两种`wztool`、`libvmaf`但是实际测试的话`libvmaf`没进行一次对比的时长要比`wztool`慢，具体可以下面**wztool、libvmaf对比测试**章节
+
+- 为了易于环境搭建，脚本默认使用`libvmaf`来获取`vmaf`，如需使用`wztool`需要使用`docker`进行搭建对应的环境
 
 - 如果使用脚本选项`start`进行遍历参数文件操作的话，需要有一个参数列表配置文件`config.data` （就是待测试的参数），可通过`generate_foot_arg.sh`生成。如果使用的是`upload`参数则需要的是`source`文件夹里面存放着需要遍历的视频文件
 
@@ -106,12 +112,6 @@ $ ls source/
 人物视频17.MP4_done      人物视频4.MP4
 人物视频18.MP4_done      .......
 ```
-
-
-
-
-
-
 
 `foot.sh`会提示以下信息
 

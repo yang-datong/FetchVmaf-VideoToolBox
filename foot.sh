@@ -1,25 +1,26 @@
 #!/bin/bash
 
+#device_id="00008110-000458D63AB8801E" #iphone13(no use wifi connect)
+#device_id="00008101-001169A13490001E" #iphone12
+devide_id="00008101-000E51A21A20001E" #iphone12 min
+bundle_id="VideoEncode-demo"
 #------------------user config-----------------------
-#device_id="00008101-001169A13490001E" #iphone12(no use wifi connect)
-device_id="00008110-000458D63AB8801E" #iphone13(no use wifi connect)
-codec_type="h264"
 #work space
-compare_patterns="libvmaf" #example -> libvmaf|wztool
-docker_container_name="centos/wztool"
-bundle_name="FFmpeg_iOS"
-bundle_id="VideoEncode"
+codec_type="h264"
 app_name="VideoEncode"
+bundle_name="FFmpeg_iOS"
 main_file="EncodeH264.m"
-tar_dir="${HOME}/Desktop/${bundle_name}/${bundle_name}"
-controller_file=${tar_dir}/ViewController.m
-target_edit_file=${tar_dir}/encode/${main_file}
+docker_container_name="centos/wztool"
+compare_patterns="libvmaf" #example -> libvmaf|wztool
+tar_dir="${HOME}/home/k客观画质测试/IOS_test/${bundle_name}"
+controller_file=${tar_dir}/${bundle_name}/ViewController.m
+target_edit_file=${tar_dir}/${bundle_name}/encode/${main_file}
 #------------------default config-----------------------
 is_auto_backup=1
 is_need_save_video=1
 is_local_upload_yuv=0
 is_parameters_verbose=0
-max_wait_time=20
+max_wait_time=30
 src="src.mp4"
 out_mp4="dst.mp4"
 dst_dir="out_video"
@@ -74,7 +75,7 @@ upload_loop(){
 		eecho "mused video format name -> [video].MP4_done ,ok? [y/n]"
 		read tmp
 	fi
-	for file in `ls source | grep -v "*.MP4\|*.mp4"`;do
+	for file in `ls source | grep -e ".MP4\|.mp4"`;do
 		loop_video_name="source/$file"
 		cp ${loop_video_name} ${src}
 		eecho "prepare video -> ${loop_video_name}"
@@ -270,6 +271,7 @@ check_parameters_config_file(){
 ########################
 #  code extract level  #
 ########################
+
 #Used save video
 save_video(){
 	if [ ! -d $dst_dir ];then mkdir $dst_dir;fi
@@ -278,6 +280,7 @@ save_video(){
 	mv $out_mp4 ${dst_dir}/out_$file
 	mv ${src_same_frames}.mp4 ${dst_dir}/same_frames_$file
 }
+
 #Used update ios project video info
 update_video_info(){
 	${mffprobe} -select_streams v -show_streams $src > $video_info_file
@@ -429,7 +432,10 @@ annotation(){
 #Use to dump iphone in [out].file[h264\h265\mp4]
 dump(){
 	check_compart_patterns
+	local old_md5=$(md5 Documents/${out_file})
 	ios-deploy -W --download=/Documents/${out_file} --bundle_id $bundle_id --to .
+	local new_md5=$(md5 Documents/${out_file})
+	eecho "$old_md5 \n$new_md5 "
 	${mffmpeg} -i Documents/$out_file -c copy ${out_mp4} -y < /dev/null
 	uniform_frames
 	eecho "use $compare_patterns ..."
