@@ -1,5 +1,3 @@
-[toc]
-
 ## 环境
 
 - `bash` shell解释器
@@ -16,7 +14,9 @@
   
 - `ffmpeg/ffplayer/ffprobe`视频编解码
 
-上述环境需要自行安装
+上述环境执行目录下`init.sh`即可完成搭建
+
+项目使用IOS应用形式进行自动化调优参数,目录中的`FFmpeg_iOS` 项目为IOS工程通过集成FFmpeg库（因为github内存问题，现在已经删除了FFmpeg lib库，需要手动集成ffmpeg）来快速解码源视频为YUV序列作为VideoToobBox的编码源数据
 
 ## 脚本结构
 

@@ -1,21 +1,21 @@
 #!/bin/bash
 
-#device_id="00008110-000458D63AB8801E" #iphone13(no use wifi connect)
-#device_id="00008101-001169A13490001E" #iphone12
-devide_id="00008101-000E51A21A20001E" #iphone12 min
+codec_type="h265" #h264
 bundle_id="VideoEncode-demo"
 #------------------user config-----------------------
 #work space
-codec_type="h264"
 app_name="VideoEncode"
 bundle_name="FFmpeg_iOS"
 main_file="EncodeH264.m"
 docker_container_name="centos/wztool"
 compare_patterns="libvmaf" #example -> libvmaf|wztool
-tar_dir="${HOME}/home/k客观画质测试/IOS_test/${bundle_name}"
+#tar_dir="${HOME}/home/k客观画质测试/IOS_test/${bundle_name}"
+tar_dir="./${bundle_name}"
 controller_file=${tar_dir}/${bundle_name}/ViewController.m
 target_edit_file=${tar_dir}/${bundle_name}/encode/${main_file}
 #------------------default config-----------------------
+device_id=($(idevice_id -l))
+device_id=${device_id[0]}
 is_auto_backup=1
 is_need_save_video=1
 is_local_upload_yuv=0
@@ -549,18 +549,19 @@ eecho(){
 
 #print use help info
 menu(){
-	echo -e "\033[33m"
-	echo -e "Target file -> ${target_edit_file}\033[0m\nexample:"
-	echo -e "\033[31m"
-	echo "./foot.sh start > /dev/null" >& 2
-	echo "./foot.sh upload > /dev/null" >& 2
-	echo "./foot.sh upload loop > /dev/null" >& 2
-	echo "./foot.sh annotation [code_line] [on\off]" >& 2
-	echo "./foot.sh justlaunch > /dev/null" >& 2
-	echo "./foot.sh dump > /dev/null" >& 2
-	echo "./foot.sh clean" >& 2
-	echo -e "./foot.sh format \033[0m      ###format compare_result_file data and calculate the average\033[31m" >& 2
-	echo -e "\033[0m"
+	echo "Usage :  $(basename $0) [options] [--]
+
+	Options:
+	help                                  Display this message
+	start                                 Start auto test
+	upload                                Upload mp4 file into the phone
+	upload loop                           Queue upload mp4 file into the phone
+	annotation [code_line] [on\off]       Annotation code
+	justlaunch                            Just simply start App
+	dump                                  Dump encode output file from phone documents
+	clean                                 Clean current directory temporary file
+	format                                Format compare_result_file data and calculate the average"
+	#echo -e "\033[33mTarget file -> ${target_edit_file}\033[0m"
 }
 
 if [ "$1" == help ];then
