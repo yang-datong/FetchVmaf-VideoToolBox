@@ -14,6 +14,7 @@ tar_dir="./${bundle_name}"
 controller_file=${tar_dir}/${bundle_name}/ViewController.m
 target_edit_file=${tar_dir}/${bundle_name}/encode/${main_file}
 #------------------default config-----------------------
+self="`pwd`/`basename $0`"
 device_id=($(idevice_id -l))
 device_id=${device_id[0]}
 is_auto_backup=1
@@ -97,20 +98,20 @@ kernel(){
 
 	if [ ! -f  $video_info_file ];then
 #====================view source video file metadata====================
-		eecho "$(sed -n $(expr $LINENO - 1)p $0)" "33"
+		eecho "$(sed -n $(expr $LINENO - 1)p $self)" "33"
 		update_video_info
 	fi
 
 	if [[ $is_upload && $is_justlaunch ]];then
 #====================decompose MP4 source files into YUV frame sequences====================
-		eecho "$(sed -n $(expr $LINENO - 1)p $0)" "33"
+		eecho "$(sed -n $(expr $LINENO - 1)p $self)" "33"
 		if [ "$is_local_upload_yuv" == 1 ];then local_decode_yuv
 		else ios_decode_yuv ;fi
 	fi
 
 	if [ ! -z "$line" ];then #Not empty string
 #1.update parameters
-		eecho "$(sed -n $(expr $LINENO - 1)p $0)......." "33"
+		eecho "$(sed -n $(expr $LINENO - 1)p $self)......." "33"
 		#Parameters1 -> will modify parameters key
 		local parameters_key=$(echo $line | awk -F ":" '{print $1}')
 		#Parameters2 -> new parameters value
@@ -129,7 +130,7 @@ kernel(){
 	fi
 
 #2.build project
-	eecho "$(sed -n $(expr $LINENO - 1)p $0)......." "33"
+	eecho "$(sed -n $(expr $LINENO - 1)p $self)......." "33"
 	pushd $tar_dir
 	xcodebuild -target $bundle_name
 	if [ "$?" == "65" ];then
@@ -138,12 +139,12 @@ kernel(){
 	fi
 
 #3.launch App && and start encode
-	eecho "$(sed -n $(expr $LINENO - 1)p $0)......." "33"
+	eecho "$(sed -n $(expr $LINENO - 1)p $self)......." "33"
 	ios-deploy -W --justlaunch --bundle ./build/Release-iphoneos/${app_name}.app
 	popd
 
 #4.wait encode done
-	eecho "$(sed -n $(expr $LINENO - 1)p $0)......." "33"
+	eecho "$(sed -n $(expr $LINENO - 1)p $self)......." "33"
 	local old_date=$(date +"%Y%m%d%H%M%S")
 	wait_encode_done
 	local date=$(date +"%Y%m%d%H%M%S")
@@ -152,7 +153,7 @@ kernel(){
 	if [ "$is_encode_time_out" == 1 ];then is_encode_time_out=0;return 1;fi
 
 #5.dump [out].h264/h265
-	eecho "$(sed -n $(expr $LINENO - 1)p $0)......." "33"
+	eecho "$(sed -n $(expr $LINENO - 1)p $self)......." "33"
 	local old_md5=$(md5 Documents/${out_file})
 	ios-deploy -W --download=/Documents/${out_file} --bundle_id $bundle_id --to .
 	local new_md5=$(md5 Documents/${out_file})
@@ -164,17 +165,18 @@ kernel(){
 	fi
 
 #6.from [out].h264/h265 file convert MP4 file
-	eecho "$(sed -n $(expr $LINENO - 1)p $0)......." "33"
+	eecho "$(sed -n $(expr $LINENO - 1)p $self)......." "33"
 	if [ "$is_parameters_verbose" == 1 ];then
 		echo "${out_mp4}-ffmpeg copy bitrate:" >> $compare_result_file
 		ffmpeg -i Documents/$out_file -c copy ${out_mp4} -y < /dev/null 2>&1 | grep "bitrate=" >> $compare_result_file
 	else
 		${mffmpeg} -i Documents/$out_file -c copy ${out_mp4} -y < /dev/null
 	fi
+	exit #TODO stop exec
 	uniform_frames
 
 #7.use wztool to compare the coding result (into docker)
-	eecho "$(sed -n $(expr $LINENO - 1)p $0)......." "33"
+	eecho "$(sed -n $(expr $LINENO - 1)p $self)......." "33"
 	if [ "$compare_patterns" == "wztool" ];then
 		into_docker_compaer_video
 	else
@@ -182,12 +184,12 @@ kernel(){
 	fi
 
 #8.get bitrate value
-	eecho "$(sed -n $(expr $LINENO - 1)p $0)......." "33"
+	eecho "$(sed -n $(expr $LINENO - 1)p $self)......." "33"
 	get_bitrate_value
 
 	if [ "$is_need_save_video" == 1 ];then
 #9.save compare video[same_frames_video,out_mp4]
-		eecho "$(sed -n $(expr $LINENO - 1)p $0)......." "33"
+		eecho "$(sed -n $(expr $LINENO - 1)p $self)......." "33"
 		save_video
 	fi
 }
@@ -358,7 +360,7 @@ local_decode_yuv(){
 uniform_frames(){
 	if [ ! -f ${src_same_frames}.mp4 ];then
 #====================uniform number of frames====================
-		eecho "$(sed -n $(expr $LINENO - 1)p $0)" "33"
+		eecho "$(sed -n $(expr $LINENO - 1)p $self)" "33"
 		#get out_file frames num
 		local compare_frame_num=$(${mffprobe} -select_streams v -show_streams $out_mp4 | grep "^nb_frames" |  awk -F "=" '{print $2}')
 		#convert : extract mp4 frames -> new mp4
@@ -510,7 +512,7 @@ clean(){
 	fi
 	#clear
 	rm -rf $data_dir #add clear yuv file
-	local tmp_file=$(ls | grep -v "foot.sh\|src.mp4\|VideoEncode_rel\|config.data\|compare_result_history.txt\|Documents\|generate_foot_arg.sh\|README.md\|source\|out_video")
+	local tmp_file=$(ls | grep -v "foot.sh\|src.mp4\|VideoEncode_rel\|config.data\|compare_result_history.txt\|Documents\|generate_foot_arg.sh\|README.md\|source\|out_video\|init.sh\|FFmpeg_iOS.zip\|FFmpeg_iOS")
 	if [ -z "$tmp_file" ];then
 		eecho "alreadly been cleaned"
 	else
